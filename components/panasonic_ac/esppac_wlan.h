@@ -64,6 +64,10 @@ class PanasonicACWLAN : public PanasonicAC {
   void handle_resend();
 
   void set_value(uint8_t key, uint8_t value);
+
+  size_t parse_property(size_t offset);
+  void decode_properties();
+  bool power_state = false;
 };
 
 }  // namespace WLAN

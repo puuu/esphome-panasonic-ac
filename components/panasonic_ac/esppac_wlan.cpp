@@ -314,7 +314,7 @@ static climate::ClimateMode determine_mode(uint8_t mode) {
     case 0x45:  // Fan only?
       return climate::CLIMATE_MODE_FAN_ONLY;
     default:
-      ESP_LOGW(TAG, "Received unknown climate mode");
+      ESP_LOGW(TAG, "Received unknown climate mode (0x%02X)", mode);
       return climate::CLIMATE_MODE_OFF;
   }
 }
@@ -334,7 +334,7 @@ static const char *determine_fan_speed(uint8_t speed) {
     case 0x41:  // Auto
       return "Automatic";
     default:
-      ESP_LOGW(TAG, "Received unknown fan speed");
+      ESP_LOGW(TAG, "Received unknown fan speed (0x%02X)", speed);
       return "Unknown";
   }
 }
@@ -348,7 +348,7 @@ static const char *determine_preset(uint8_t preset) {
     case 0x41:  // Normal
       return "Normal";
     default:
-      ESP_LOGW(TAG, "Received unknown preset");
+      ESP_LOGW(TAG, "Received unknown preset (0x%02X)", preset);
       return "Normal";
   }
 }
@@ -366,7 +366,7 @@ static const char *determine_swing_vertical(uint8_t swing) {
     case 0x41:  // Up
       return "up";
     default:
-      ESP_LOGW(TAG, "Received unknown vertical swing position");
+      ESP_LOGW(TAG, "Received unknown vertical swing position (0x%02X)", swing);
       return "Unknown";
   }
 }
@@ -384,7 +384,7 @@ static const char *determine_swing_horizontal(uint8_t swing) {
     case 0x41:  // Right
       return "right";
     default:
-      ESP_LOGW(TAG, "Received unknown horizontal swing position");
+      ESP_LOGW(TAG, "Received unknown horizontal swing position (0x%02X)", swing);
       return "Unknown";
   }
 }
@@ -400,7 +400,7 @@ static climate::ClimateSwingMode determine_swing(uint8_t swing) {
     case 0x44:  // Horizontal
       return climate::CLIMATE_SWING_HORIZONTAL;
     default:
-      ESP_LOGW(TAG, "Received unknown swing mode");
+      ESP_LOGW(TAG, "Received unknown swing mode (0x%02X)", swing);
       return climate::CLIMATE_SWING_OFF;
   }
 }
@@ -427,40 +427,11 @@ void PanasonicACWLAN::handle_packet() {
   {
     ESP_LOGD(TAG, "Received query response");
 
-    if (this->rx_buffer_.size() != 125) {
-      ESP_LOGW(TAG, "Received invalid query response");
+    if (this->rx_buffer_.size() < 12) {
+      ESP_LOGW(TAG, "Received too short query response (size: %d)", this->rx_buffer_.size());
       return;
     }
-
-    if (this->rx_buffer_[14] == 0x31)          // Check if power state is off
-      this->mode = climate::CLIMATE_MODE_OFF;  // Climate is off
-    else {
-      this->mode = determine_mode(this->rx_buffer_[18]);  // Check mode if power state is not off
-    }
-
-    update_target_temperature((int8_t) this->rx_buffer_[22]);
-    update_current_temperature((int8_t) this->rx_buffer_[62]);
-    update_outside_temperature((int8_t) this->rx_buffer_[66]);  // Set current (outside) temperature
-
-    StringRef horizontalSwing(determine_swing_horizontal(this->rx_buffer_[34]));
-    StringRef verticalSwing(determine_swing_vertical(this->rx_buffer_[38]));
-
-    update_swing_horizontal(horizontalSwing);
-    update_swing_vertical(verticalSwing);
-
-    bool nanoex = determine_nanoex(this->rx_buffer_[50]);
-
-    update_nanoex(nanoex);
-
-    this->set_custom_fan_mode_(determine_fan_speed(this->rx_buffer_[26]));
-    this->set_custom_preset_(determine_preset(this->rx_buffer_[42]));
-
-    this->swing_mode = determine_swing(this->rx_buffer_[30]);
-
-    // climate::ClimateAction action = determine_action(); // Determine the current action of the AC
-    // this->action = action;
-
-    this->publish_state();
+    this->decode_properties();
   } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x88)  // Command ack
   {
     ESP_LOGV(TAG, "Received command ack");
@@ -469,87 +440,11 @@ void PanasonicACWLAN::handle_packet() {
     ESP_LOGV(TAG, "Received report");
     send_command(CMD_REPORT_ACK, sizeof(CMD_REPORT_ACK), CommandType::Response);
 
-    if (this->rx_buffer_.size() < 13) {
-      ESP_LOGE(TAG, "Report is too short to handle");
+    if (this->rx_buffer_.size() < 12) {
+      ESP_LOGE(TAG, "Report is too short to handle (size: %d)", this->rx_buffer_.size());
       return;
     }
-
-    // 0 = Header & packet type
-    // 1 = Packet length
-    // 2 = Key value pair counter
-    for (int i = 0; i < this->rx_buffer_[10]; i++) {
-      // Offset everything by header, packet length and pair counter (4 * 3)
-      // then offset by pair length (i * 4)
-      int currentIndex = (4 * 3) + (i * 4);
-
-      // 0 = Header
-      // 1 = Data
-      // 2 = Data
-      // 3 = ?
-      switch (this->rx_buffer_[currentIndex]) {
-        case 0x80:  // Power mode
-          switch (this->rx_buffer_[currentIndex + 2]) {
-            case 0x30:  // Power mode on
-              ESP_LOGV(TAG, "Received power mode on");
-              // Ignore power on and let mode be set by other report
-              break;
-            case 0x31:  // Power mode off
-              ESP_LOGV(TAG, "Received power mode off");
-              this->mode = climate::CLIMATE_MODE_OFF;
-              break;
-            default:
-              ESP_LOGW(TAG, "Received unknown power mode");
-              break;
-          }
-          break;
-        case 0xB0:  // Mode
-          this->mode = determine_mode(this->rx_buffer_[currentIndex + 2]);
-          break;
-        case 0x31:  // Target temperature
-          ESP_LOGV(TAG, "Received target temperature");
-          update_target_temperature((int8_t) this->rx_buffer_[currentIndex + 2]);
-          break;
-        case 0xA0:  // Fan speed
-          ESP_LOGV(TAG, "Received fan speed");
-          this->set_custom_fan_mode_(determine_fan_speed(this->rx_buffer_[currentIndex + 2]));
-          break;
-        case 0xB2:  // Preset
-          ESP_LOGV(TAG, "Received preset");
-          this->set_custom_preset_(determine_preset(this->rx_buffer_[currentIndex + 2]));
-          break;
-        case 0xA1:
-          ESP_LOGV(TAG, "Received swing mode");
-          this->swing_mode = determine_swing(this->rx_buffer_[currentIndex + 2]);
-          break;
-        case 0xA5:  // Horizontal swing position
-          ESP_LOGV(TAG, "Received horizontal swing position");
-
-          update_swing_horizontal(StringRef(determine_swing_horizontal(this->rx_buffer_[currentIndex + 2])));
-          break;
-        case 0xA4:  // Vertical swing position
-          ESP_LOGV(TAG, "Received vertical swing position");
-
-          update_swing_vertical(StringRef(determine_swing_vertical(this->rx_buffer_[currentIndex + 2])));
-          break;
-        case 0x33:  // nanoex mode
-          ESP_LOGV(TAG, "Received nanoex state");
-
-          update_nanoex(determine_nanoex(this->rx_buffer_[currentIndex + 2]));
-          break;
-        case 0x20:
-          ESP_LOGV(TAG, "Received unknown nanoex field");
-          // Not sure what this one, ignore it for now
-          break;
-        default:
-          ESP_LOGW(TAG, "Report has unknown field");
-          break;
-      }
-    }
-
-    climate::ClimateAction action = determine_action();  // Determine the current action of the AC
-    this->action = action;
-
-    this->publish_state();
+    this->decode_properties();
   } else if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0x80)  // Answer for handshake 16
   {
     ESP_LOGI(TAG, "Panasonic AC component v%s initialized", VERSION);
@@ -859,6 +754,118 @@ void PanasonicACWLAN::on_mild_dry_change(bool state) {
   // }
 
   // send_set_command();
+}
+
+void PanasonicACWLAN::decode_properties() {
+    size_t offset = 6 + 5;
+    while (offset < (rx_buffer_.size() - 1)) {
+      offset = parse_property(offset);
+    }
+    if (!this->power_state) this->mode = climate::CLIMATE_MODE_OFF;
+    climate::ClimateAction action = determine_action();  // Determine the current action of the AC
+    this->action = action;
+    this->publish_state();
+}
+
+size_t PanasonicACWLAN::parse_property(size_t offset) {
+  uint8_t attrb = this->rx_buffer_[offset];
+  uint8_t property = this->rx_buffer_[offset + 1];
+  uint8_t length = this->rx_buffer_[offset + 2];
+  const uint8_t *value = &this->rx_buffer_[offset + 3];
+  switch(property) {
+    case 0x80:  // Power mode
+      if (length == 1) {
+        switch (value[0]) {
+          case 0x30:  // Power mode on
+            ESP_LOGV(TAG, "Received power mode on");
+            this->power_state = true;
+            break;
+          case 0x31:  // Power mode off
+            ESP_LOGV(TAG, "Received power mode off");
+            this->power_state = false;
+            break;
+          default:
+            ESP_LOGW(TAG, "Received unknown power mode (0x%02X)", value[0]);
+            break;
+        }
+      }
+      break;
+    case 0xB0:  // Mode
+      if (length == 1) {
+        this->mode = determine_mode(value[0]);
+      }
+      break;
+    case 0x31:  // Target temperature (old)
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received target temperature");
+        update_target_temperature(value[0]);
+      }
+      break;
+    case 0xB3:  // Target temperature (echonet)
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received target temperature (echonet)");
+        update_target_temperature(value[0] * 2);
+      }
+      break;
+    case 0xF5:  // Target temperature (new)
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received target temperature (F5)");
+        uint8_t temp_raw = ((value[0] & 0x7f) << 1) | (value[0] >> 7);
+        update_target_temperature(temp_raw);
+      }
+      break;
+    case 0xBB:  // Current temperature
+      if (length == 1) {
+        update_current_temperature((int8_t)value[0]);
+      }
+      break;
+    case 0xBE:  // Outside temperature
+      if (length == 1) {
+        update_outside_temperature((int8_t)value[0]);
+      }
+      break;
+    case 0xA0:  // Fan speed
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received fan speed");
+        this->set_custom_fan_mode_(determine_fan_speed(value[0]));
+      }
+      break;
+    case 0xB2: // Preset
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received preset");
+        this->set_custom_preset_(determine_preset(value[0]));
+      }
+      break;
+    case 0xA1:  // swing mode
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received swing mode");
+        this->swing_mode = determine_swing(value[0]);
+      }
+      break;
+    case 0xA5:  // Horizontal swing position
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received horizontal swing position");
+        update_swing_horizontal(StringRef(determine_swing_horizontal(value[0])));
+      }
+      break;
+    case 0xA4:  // Vertical swing position
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received vertical swing position");
+        update_swing_vertical(StringRef(determine_swing_vertical(value[0])));
+      }
+      break;
+    case 0x33:  // nanoex mode
+      if (length == 1) {
+        ESP_LOGV(TAG, "Received nanoex state");
+        update_nanoex(determine_nanoex(value[0]));
+      }
+      break;
+    default:
+      ESP_LOGD(TAG,
+        "Unknown property: attrb=0x%02X id=0x%02X len=%u value[0]=0x%02X",
+        attrb, property, length, value[0]);
+  }
+  return offset + 3 + length;
 }
 
 }  // namespace WLAN
