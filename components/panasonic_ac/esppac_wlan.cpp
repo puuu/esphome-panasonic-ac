@@ -111,8 +111,13 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_target_temperature().has_value()) {
-    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset", *call.get_target_temperature(), *call.get_target_temperature() - this->current_temperature_offset_);
-    set_value(0x31, (*call.get_target_temperature() - this->current_temperature_offset_) * 2);
+    float temperature = *call.get_target_temperature() - this->current_temperature_offset_;
+    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset", *call.get_target_temperature(), temperature);
+    set_value(0xB3, temperature);
+    set_value(0x31, (temperature) * 2);
+    uint8_t temp = temperature * 2;
+    temp = (temp >> 1) | ((temp & 1) << 7);
+    set_value(0xF5, temp);
   }
 
   if (call.has_custom_fan_mode()) {
