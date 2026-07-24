@@ -178,19 +178,26 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
     ESP_LOGV(TAG, "Requested preset change");
 
     const StringRef preset = call.get_custom_preset();
+    uint8_t value0b[3] = {0x33, 0xFF, 0x00};
 
     if (preset == "Normal") {
       set_value(0xB2, 0x41);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
+      value0b[2] = 0x3C;
+      set_value(0x0B, value0b, sizeof(value0b));
     } else if (preset == "Powerful") {
       set_value(0xB2, 0x42);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
+      value0b[2] = 0x3D;
+      set_value(0x0B, value0b, sizeof(value0b));
     } else if (preset == "Quiet") {
       set_value(0xB2, 0x43);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
+      value0b[2] = 0x7C;
+      set_value(0x0B, value0b, sizeof(value0b));
     } else
       ESP_LOGV(TAG, "Unsupported preset requested");
   }
