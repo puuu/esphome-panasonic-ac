@@ -532,36 +532,33 @@ void PanasonicACWLAN::handle_handshake_packet() {
  */
 
 void PanasonicACWLAN::send_set_command() {
-  // Size of packet is 3 * 4 (for the header, packet size, and key value pair counter)
-  // setQueueIndex * 4 for the individual key value pairs
-  int packetLength = (3 * 4) + (this->set_queue_index_ * 4);
+  // Packet structure
+  // HEADER(1) SEQUENCE(1) MESSAGE_TYPE(2) PAYLOAD_LENGTH(2) PAYLOAD(PAYLOAD_LENGTH) CHECKSUM(1)
+  // Payload structure
+  // PAYLOAD_ATTRIBUTE(1) OBJECT_ID(3) PROPERTY_COUNT(1) PROPERTY_LIST
+  // Property structure
+  // PROPERTY_ATTRIBUTE(1) PROPERTY_ID(1) VALUE_LENGTH(1) VALUE(VALUE_LENGTH)
+  int packetLength = 6 + (5 + this->set_queue_index_) + 1;
   std::vector<uint8_t> packet(packetLength);
-
-  // Mark this packet as a set command
+  // Message type
   packet[2] = 0x10;
   packet[3] = 0x08;
-
-  packet[4] = 0x00;                                  // Packet size header
-  packet[5] = (4 * this->set_queue_index_) - 1 + 6;  // Packet size, key value pairs * 4, subtract checksum (-1), add 4
-                                                     // for key value pair counter and 2 for rest of packet size
+  // payload length
+  packet[4] = 0x00;
+  packet[5] = 5 + this->set_queue_index_;
+  // payload attribute
   packet[6] = 0x01;
+  // property id
   packet[7] = 0x01;
-
-  packet[8] = 0x30;  // Key value pair counter header
+  packet[8] = 0x30;
   packet[9] = 0x01;
-  packet[10] = this->set_queue_index_;  // Key value pair counter
-  packet[11] = 0x00;
-
-  for (int i = 0; i < this->set_queue_index_; i++) {
-    packet[12 + (i * 4) + 0] = this->set_queue_[i][0];  // Key
-    packet[12 + (i * 4) + 1] = 0x01;                    // Unknown, always 0x01
-    packet[12 + (i * 4) + 2] = this->set_queue_[i][1];  // Value
-    packet[12 + (i * 4) + 3] =
-        0x00;  // Unknown, either 0x00 or 0x01 or 0x02; overwritten by checksum on last key value pair
-  }
-
+  // property count
+  packet[10] = this->set_queue_property_num_;
+  // property list
+  memcpy(&packet[11], this->set_queue_, this->set_queue_index_);
   send_packet(packet, CommandType::Normal);
   this->set_queue_index_ = 0;
+  this->set_queue_property_num_ = 0;
 }
 
 void PanasonicACWLAN::send_command(const uint8_t *command, size_t commandLength, CommandType type) {
@@ -636,17 +633,26 @@ void PanasonicACWLAN::handle_resend() {
   }
 }
 
-void PanasonicACWLAN::set_value(uint8_t key, uint8_t value) {
-  if (this->set_queue_index_ >= 15) {
+void PanasonicACWLAN::set_value(uint8_t property, uint8_t value, uint8_t attrb) {
+  this->set_value(property, &value, 1, attrb);
+}
+
+void PanasonicACWLAN::set_value(uint8_t property, const uint8_t *value, size_t length, uint8_t attrb) {
+  if ((this->set_queue_index_ + 3 + length) >= sizeof(this->set_queue_)) {
     ESP_LOGE(TAG, "Set queue overflow");
     this->set_queue_index_ = 0;
+    this->set_queue_property_num_ = 0;
     return;
   }
-
-  this->set_queue_[this->set_queue_index_][0] = key;
-  this->set_queue_[this->set_queue_index_][1] = value;
-  this->set_queue_index_++;
+  this->set_queue_[this->set_queue_index_++] = attrb;  // preperty attribute
+  this->set_queue_[this->set_queue_index_++] = property;  // property id
+  this->set_queue_[this->set_queue_index_++] = length;  // length
+  for (size_t i = 0; i < length; i++) { // value
+    this->set_queue_[this->set_queue_index_++] = value[i];
+  }
+  this->set_queue_property_num_++;
 }
+
 
 /*
  * Sensor handling
