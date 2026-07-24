@@ -370,6 +370,10 @@ static const char *determine_preset(uint8_t preset) {
 
 static const char *determine_swing_vertical(uint8_t swing) {
   switch (swing) {
+    case 0x46:  // Automatic
+      return "auto";
+    case 0x47:  // Swinging
+      return "swing";
     case 0x42:  // Down
       return "down";
     case 0x45:  // Down center
@@ -690,6 +694,10 @@ void PanasonicACWLAN::on_vertical_swing_change(const StringRef& swing) {
     set_value(0xA4, 0x44);
   else if (swing == "up")
     set_value(0xA4, 0x41);
+  else if (swing == "auto")
+    set_value(0xF4, 0x46);
+  else if (swing == "swing")
+    set_value(0xF4, 0x47);
 
   send_set_command();
 }
@@ -892,6 +900,7 @@ size_t PanasonicACWLAN::parse_property(size_t offset, size_t end) {
       }
       break;
     case 0xA4:  // Vertical swing position
+    case 0xF4:
       if (length == 1) {
         ESP_LOGV(TAG, "Received vertical swing position");
         update_swing_vertical(StringRef(determine_swing_vertical(value[0])));
