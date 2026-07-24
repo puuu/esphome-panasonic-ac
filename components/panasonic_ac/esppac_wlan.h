@@ -47,8 +47,9 @@ class PanasonicACWLAN : public PanasonicAC {
   const uint8_t *last_command_;  // Stores a pointer to the last command we executed
   size_t last_command_length_;   // Stores the length of the last command we executed
 
-  uint8_t set_queue_[16][2];     // Queue to store the key/value for the set commands
-  uint8_t set_queue_index_ = 0;  // Stores the index of the next key/value set
+  uint8_t set_queue_[64];     // Queue to store the properties for the set commands
+  uint8_t set_queue_index_ = 0;  // Stores the index of the next set property
+  uint8_t set_queue_property_num_ = 0;  // Stores the numbers of set property
 
   void handle_init_packets();
   void handle_handshake_packet();
@@ -63,7 +64,8 @@ class PanasonicACWLAN : public PanasonicAC {
 
   void handle_resend();
 
-  void set_value(uint8_t key, uint8_t value);
+  void set_value(uint8_t property, uint8_t value, uint8_t attrb=0x00);
+  void set_value(uint8_t property, const uint8_t *value, size_t length, uint8_t attrb=0x00);
 
   size_t parse_property(size_t offset);
   void decode_properties();
