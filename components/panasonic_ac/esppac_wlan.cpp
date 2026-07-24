@@ -347,10 +347,13 @@ static const char *determine_fan_speed(uint8_t speed) {
 static const char *determine_preset(uint8_t preset) {
   switch (preset) {
     case 0x43:  // Quiet
+    case 0x7C:  // Quiet (alternative)
       return "Quiet";
     case 0x42:  // Powerful
+    case 0x3D:  // Powerful (alternative)
       return "Powerful";
     case 0x41:  // Normal
+    case 0x3C:  // Normal (alternative)
       return "Normal";
     default:
       ESP_LOGW(TAG, "Received unknown preset (0x%02X)", preset);
@@ -861,6 +864,12 @@ size_t PanasonicACWLAN::parse_property(size_t offset, size_t end) {
       if (length == 1) {
         ESP_LOGV(TAG, "Received preset");
         this->set_custom_preset_(determine_preset(value[0]));
+      }
+      break;
+    case 0x0B: // Preset (alternative)
+      if (length == 3) {
+        ESP_LOGV(TAG, "Received preset (alternative)");
+        this->set_custom_preset_(determine_preset(value[2]));
       }
       break;
     case 0xA1:  // swing mode
