@@ -524,74 +524,35 @@ void PanasonicACWLAN::handle_handshake_packet() {
  */
 
 void PanasonicACWLAN::send_set_command() {
-  // Packet structure
-  // HEADER(1) SEQUENCE(1) MESSAGE_TYPE(2) PAYLOAD_LENGTH(2) PAYLOAD(PAYLOAD_LENGTH) CHECKSUM(1)
-  // Payload structure
-  // PAYLOAD_ATTRIBUTE(1) OBJECT_ID(3) PROPERTY_COUNT(1) PROPERTY_LIST
-  // Property structure
-  // PROPERTY_ATTRIBUTE(1) PROPERTY_ID(1) VALUE_LENGTH(1) VALUE(VALUE_LENGTH)
-  int packetLength = 6 + (5 + this->set_queue_index_) + 1;
-  std::vector<uint8_t> packet(packetLength);
-  // Message type
-  packet[2] = 0x10;
-  packet[3] = 0x08;
-  // payload length
-  packet[4] = 0x00;
-  packet[5] = 5 + this->set_queue_index_;
-  // payload attribute
-  packet[6] = 0x01;
-  // property id
-  packet[7] = 0x01;
-  packet[8] = 0x30;
-  packet[9] = 0x01;
-  // property count
-  packet[10] = this->set_queue_property_num_;
-  // property list
-  memcpy(&packet[11], this->set_queue_, this->set_queue_index_);
-  send_packet(packet, CommandType::Normal);
-  this->set_queue_index_ = 0;
-  this->set_queue_property_num_ = 0;
+  if (this->set_queue_index_ == 0) return;  // nothing queued
+  this->send_packet(CommandType::Normal);
 }
 
 void PanasonicACWLAN::send_command(const uint8_t *command, size_t commandLength, CommandType type) {
-  std::vector<uint8_t> packet(commandLength + 3);  // Reserve space for upcoming packet
-
-  for (int i = 0; i < commandLength; i++)  // Loop through command
-  {
-    packet[i + 2] = command[i];  // Add to packet
+  if ((commandLength + 3) > sizeof(this->tx_buffer_)) {
+    ESP_LOGE(TAG, "Failed to create packet from command: command size (%d) exceeds packet capacity (%d).", commandLength, sizeof(this->tx_buffer_));
+    return;
   }
-
-  this->last_command_ = command;               // Store the last command we sent
-  this->last_command_length_ = commandLength;  // Store the length of the last command we sent
-
-  send_packet(packet, type);  // Actually send the constructed packet
+  memcpy(&this->tx_buffer_[2], command, commandLength);
+  this->set_queue_index_ = commandLength + 2;
+  this->send_packet(type);
 }
 
-void PanasonicACWLAN::send_packet(std::vector<uint8_t> packet, CommandType type) {
-  uint8_t length = packet.size();
+void PanasonicACWLAN::send_packet(CommandType type) {
+  uint8_t length = this->set_queue_index_ + 1;
 
-  uint8_t checksum = 0;  // Checksum is calculated by adding all bytes together
-  packet[0] = HEADER;    // Write header to packet
+  this->tx_buffer_[0] = HEADER;    // Write header to packet
 
   uint8_t packetCount = this->transmit_packet_count_;  // Set packet counter
-
   if (type == CommandType::Response)
     packetCount = this->receive_packet_count_;  // Set the packet counter to the rx counter
-  else if (type == CommandType::Resend)
-    packetCount = this->transmit_packet_count_ -
-                  1;  // Set the packet counter to the tx counter -1 (we are sending the same packet again)
+  this->tx_buffer_[1] = packetCount;  // Write to packet
 
-  packet[1] = packetCount;  // Write to packet
-
-  for (uint8_t i : packet)  // Loop through payload to calculate checksum
-  {
-    checksum += i;  // Add byte to checksum
+  uint8_t checksum = 0;  // Checksum is calculated by adding all bytes together
+  for (size_t i = 0; i < length - 1; i++) { // Loop through payload to calculate checksum
+    checksum += this->tx_buffer_[i];  // Add byte to checksum
   }
-
-  checksum = (~checksum + 1);     // Compute checksum
-  packet[length - 1] = checksum;  // Add checksum to end of packet
-
-  this->last_packet_sent_ = millis();  // Save the time when we sent the last packet
+  this->tx_buffer_[length - 1] = (~checksum + 1);     // Compute checksum
 
   if (type == CommandType::Normal)  // Do not increase tx counter if this was a response or if this was a resent packet
   {
@@ -609,8 +570,10 @@ void PanasonicACWLAN::send_packet(std::vector<uint8_t> packet, CommandType type)
   if (type != CommandType::Response)     // Don't wait for a response for responses
     this->waiting_for_response_ = true;  // Mark that we are waiting for a response
 
-  write_array(packet);       // Write to UART
-  log_packet(packet, true);  // Write to log
+  this->last_sent_length_ = length;  // remember what actually went out, for resend
+  write_array(this->tx_buffer_, length);       // Write to UART
+  this->last_packet_sent_ = millis();  // Save the time when we sent the last packet
+  this->set_queue_index_ = 0;
 }
 
 /*
@@ -621,8 +584,33 @@ void PanasonicACWLAN::handle_resend() {
       this->rx_buffer_.empty())  // Check if AC failed to respond in time and resend packet, if nothing was received yet
   {
     ESP_LOGD(TAG, "Resending previous packet");
-    send_command(this->last_command_, this->last_command_length_, CommandType::Resend);
+    this->write_array(this->tx_buffer_, this->last_sent_length_);
+    this->last_packet_sent_ = millis();
   }
+}
+
+void PanasonicACWLAN::start_property_packet(uint8_t msg_type_hi, uint8_t msg_type_lo) {
+  // Packet structure
+  // HEADER(1) SEQUENCE(1) MESSAGE_TYPE(2) PAYLOAD_LENGTH(2) PAYLOAD(PAYLOAD_LENGTH) CHECKSUM(1)
+  // Payload structure
+  // PAYLOAD_ATTRIBUTE(1) OBJECT_ID(3) PROPERTY_COUNT(1) PROPERTY_LIST
+  // Property structure
+  // PROPERTY_ATTRIBUTE(1) PROPERTY_ID(1) VALUE_LENGTH(1) VALUE(VALUE_LENGTH)
+  // Message type
+  this->tx_buffer_[2] = msg_type_hi;
+  this->tx_buffer_[3] = msg_type_lo;
+  // payload length
+  this->tx_buffer_[4] = 0;
+  this->tx_buffer_[5] = 0;
+  // payload attribute
+  this->tx_buffer_[6] = 0x01;
+  // property list id
+  this->tx_buffer_[7] = 0x01;
+  this->tx_buffer_[8] = 0x30;
+  this->tx_buffer_[9] = 0x01;
+  // property count
+  this->tx_buffer_[10] = 0;
+  this->set_queue_index_ = 11;
 }
 
 void PanasonicACWLAN::set_value(uint8_t property, uint8_t value, uint8_t attrb) {
@@ -630,19 +618,24 @@ void PanasonicACWLAN::set_value(uint8_t property, uint8_t value, uint8_t attrb) 
 }
 
 void PanasonicACWLAN::set_value(uint8_t property, const uint8_t *value, size_t length, uint8_t attrb) {
-  if ((this->set_queue_index_ + 3 + length) >= sizeof(this->set_queue_)) {
-    ESP_LOGE(TAG, "Set queue overflow");
-    this->set_queue_index_ = 0;
-    this->set_queue_property_num_ = 0;
+  if (this->set_queue_index_ == 0) {  // Starting a fresh property-based packet
+    this->start_property_packet(0x10, 0x08);
+  }
+  if ((this->set_queue_index_ + 3 + length) >= sizeof(this->tx_buffer_)) {
+    ESP_LOGE(TAG, "Adding property 0x%02X failed. No space left in tx buffer.", property);
     return;
   }
-  this->set_queue_[this->set_queue_index_++] = attrb;  // property attribute
-  this->set_queue_[this->set_queue_index_++] = property;  // property id
-  this->set_queue_[this->set_queue_index_++] = length;  // length
-  for (size_t i = 0; i < length; i++) { // value
-    this->set_queue_[this->set_queue_index_++] = value[i];
+  this->tx_buffer_[this->set_queue_index_++] = attrb;  // property attribute
+  this->tx_buffer_[this->set_queue_index_++] = property;  // property id
+  this->tx_buffer_[this->set_queue_index_++] = length;  // length
+  if (length > 0) {
+    memcpy(&(this->tx_buffer_[this->set_queue_index_]), value, length); //value
   }
-  this->set_queue_property_num_++;
+  this->set_queue_index_ += length;
+  uint16_t payload_length = this->set_queue_index_ - 6;
+  this->tx_buffer_[4] = static_cast<uint8_t>(payload_length >> 8);
+  this->tx_buffer_[5] = static_cast<uint8_t>(payload_length & 0xFF);
+  this->tx_buffer_[10]++;  // property count
 }
 
 /*
