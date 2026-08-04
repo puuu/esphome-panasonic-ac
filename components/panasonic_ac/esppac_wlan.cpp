@@ -530,8 +530,14 @@ void PanasonicACWLAN::send_set_command() {
 
 void PanasonicACWLAN::send_poll() {
   this->start_property_packet(0x10, 0x09);
-  for (const auto &p : POLL_PROPERTIES)
+  if (this->poll_properties_mode_ == PollPropertiesMode::EXTEND) {
+    for (const auto &p : POLL_PROPERTIES) {
+      this->request_value(p.property, p.attrb);
+    }
+  }
+  for (const auto &p : this->extra_poll_properties_) {
     this->request_value(p.property, p.attrb);
+  }
   this->send_set_command();
 }
 
