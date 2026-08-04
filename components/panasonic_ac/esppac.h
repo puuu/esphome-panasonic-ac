@@ -34,7 +34,7 @@ enum class ACType {
 class PanasonicAC : public Component, public uart::UARTDevice, public climate::Climate {
  public:
   void set_outside_temperature_sensor(sensor::Sensor *outside_temperature_sensor);
-  void set_outside_temperature_offset(int8_t outside_temperature_offset);
+  void set_outside_temperature_offset(float outside_temperature_offset);
   void set_vertical_swing_select(select::Select *vertical_swing_select);
   void set_horizontal_swing_select(select::Select *horizontal_swing_select);
   void set_nanoex_switch(switch_::Switch *nanoex_switch);
@@ -45,7 +45,7 @@ class PanasonicAC : public Component, public uart::UARTDevice, public climate::C
   void set_defrost_sensor(binary_sensor::BinarySensor *defrost_sensor);
 
   void set_current_temperature_sensor(sensor::Sensor *current_temperature_sensor);
-  void set_current_temperature_offset(int8_t current_temperature_offset);
+  void set_current_temperature_offset(float current_temperature_offset);
 
   void setup() override;
   void loop() override;
@@ -65,8 +65,8 @@ class PanasonicAC : public Component, public uart::UARTDevice, public climate::C
   size_t vertical_swing_state_;
   size_t horizontal_swing_state_;
 
-  int8_t current_temperature_offset_ = 0;  // current temperature offset to compensate internal sensor values
-  int8_t outside_temperature_offset_ = 0;  // outside temperature offset to compensate internal sensor values
+  float current_temperature_offset_ = 0;  // current temperature offset to compensate internal sensor values
+  float outside_temperature_offset_ = 0;  // outside temperature offset to compensate internal sensor values
   bool nanoex_state_ = false;    // Stores the state of nanoex to prevent duplicate packets
   bool eco_state_ = false;       // Stores the state of eco to prevent duplicate packets
   bool econavi_state_ = false;       // Stores the state of econavi to prevent duplicate packets
@@ -88,8 +88,8 @@ class PanasonicAC : public Component, public uart::UARTDevice, public climate::C
 
   void read_data();
 
-  void update_outside_temperature(int8_t temperature);
-  void update_current_temperature(int8_t temperature);
+  void update_outside_temperature(float temperature);
+  void update_current_temperature(float temperature);
   void update_target_temperature(uint8_t raw_value);
   void update_swing_horizontal(const StringRef &swing);
   void update_swing_vertical(const StringRef &swing);

@@ -69,8 +69,8 @@ PANASONIC_COMMON_SCHEMA = {
     ),
     cv.Optional(CONF_DEFROST_SENSOR): binary_sensor.binary_sensor_schema(),
     cv.Optional(CONF_NANOEX_SWITCH): SWITCH_SCHEMA,
-    cv.Optional(CONF_OUTSIDE_TEMPERATURE_OFFSET): cv.int_range(min=-15, max=15),
-    cv.Optional(CONF_CURRENT_TEMPERATURE_OFFSET): cv.int_range(min=-15, max=15),
+    cv.Optional(CONF_OUTSIDE_TEMPERATURE_OFFSET): cv.float_range(min=-15, max=15),
+    cv.Optional(CONF_CURRENT_TEMPERATURE_OFFSET): cv.float_range(min=-15, max=15),
 }
 
 POLL_PROPERTIES_MODE_OPTIONS = {

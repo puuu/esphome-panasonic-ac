@@ -853,8 +853,13 @@ size_t PanasonicACWLAN::parse_property(size_t offset) {
       }
       break;
     case 0xBB:  // Current temperature
-      if (length == 1) {
+      if (length == 1 && this->get_traits().get_visual_current_temperature_step() >= 0.5) {
         update_current_temperature((int8_t)value[0]);
+      }
+      break;
+    case 0x05:  // Current temperature (float)
+      if (length == 2) {
+        update_current_temperature((static_cast<float>(value[0]) / 256.0f) + static_cast<int8_t>(value[1]));
       }
       break;
     case 0xBE:  // Outside temperature
