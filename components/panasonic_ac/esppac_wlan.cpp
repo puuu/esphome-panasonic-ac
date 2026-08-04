@@ -203,7 +203,7 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
 void PanasonicACWLAN::handle_poll() {
   if (this->state_ == ACState::Ready && millis() - this->last_packet_sent_ > POLL_INTERVAL) {
     ESP_LOGV(TAG, "Polling AC");
-    send_command(CMD_POLL, sizeof(CMD_POLL));
+    this->send_poll();
   }
 }
 
@@ -225,7 +225,7 @@ void PanasonicACWLAN::handle_init_packets() {
              millis() - this->last_packet_sent_ > FIRST_POLL_TIMEOUT)  // Handle sending first poll
   {
     ESP_LOGD(TAG, "Polling for the first time");
-    send_command(CMD_POLL, sizeof(CMD_POLL));
+    this->send_poll();
 
     this->state_ = ACState::HandshakeEnding;
   } else if (this->state_ == ACState::HandshakeEnding &&
@@ -528,6 +528,13 @@ void PanasonicACWLAN::send_set_command() {
   this->send_packet(CommandType::Normal);
 }
 
+void PanasonicACWLAN::send_poll() {
+  this->start_property_packet(0x10, 0x09);
+  for (const auto &p : POLL_PROPERTIES)
+    this->request_value(p.property, p.attrb);
+  this->send_set_command();
+}
+
 void PanasonicACWLAN::send_command(const uint8_t *command, size_t commandLength, CommandType type) {
   if ((commandLength + 3) > sizeof(this->tx_buffer_)) {
     ESP_LOGE(TAG, "Failed to create packet from command: command size (%d) exceeds packet capacity (%d).", commandLength, sizeof(this->tx_buffer_));
@@ -636,6 +643,10 @@ void PanasonicACWLAN::set_value(uint8_t property, const uint8_t *value, size_t l
   this->tx_buffer_[4] = static_cast<uint8_t>(payload_length >> 8);
   this->tx_buffer_[5] = static_cast<uint8_t>(payload_length & 0xFF);
   this->tx_buffer_[10]++;  // property count
+}
+
+void PanasonicACWLAN::request_value(uint8_t property, uint8_t attrb) {
+  this->set_value(property, nullptr, 0, attrb);
 }
 
 /*

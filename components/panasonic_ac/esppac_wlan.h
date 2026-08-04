@@ -57,6 +57,7 @@ class PanasonicACWLAN : public PanasonicAC {
   void handle_packet();
 
   void send_set_command();
+  void send_poll();
   void send_command(const uint8_t *command, size_t commandLength, CommandType type = CommandType::Normal);
   void send_packet(CommandType type);
 
@@ -65,6 +66,7 @@ class PanasonicACWLAN : public PanasonicAC {
   void start_property_packet(uint8_t msg_type_hi, uint8_t msg_type_lo);
   void set_value(uint8_t property, uint8_t value, uint8_t attrb=0x00);
   void set_value(uint8_t property, const uint8_t *value, size_t length, uint8_t attrb=0x00);
+  void request_value(uint8_t property, uint8_t attrb=0x00);
 
   size_t parse_property(size_t offset);
   void decode_properties();
