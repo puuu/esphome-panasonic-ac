@@ -773,8 +773,10 @@ void PanasonicACWLAN::on_mild_dry_change(bool state) {
 
 void PanasonicACWLAN::decode_properties() {
     size_t offset = 6 + 5;
-    while (offset < (rx_buffer_.size() - 1)) {
-      offset = parse_property(offset);
+    size_t size = rx_buffer_.size();
+    size_t end = size > 0 ? size - 1 : 0;
+    while ((offset + 3) <= end) {
+      offset = parse_property(offset, end);
     }
     if (!this->power_state) this->mode = climate::CLIMATE_MODE_OFF;
     climate::ClimateAction action = determine_action();  // Determine the current action of the AC
@@ -782,11 +784,16 @@ void PanasonicACWLAN::decode_properties() {
     this->publish_state();
 }
 
-size_t PanasonicACWLAN::parse_property(size_t offset) {
+size_t PanasonicACWLAN::parse_property(size_t offset, size_t end) {
   uint8_t attrb = this->rx_buffer_[offset];
   uint8_t property = this->rx_buffer_[offset + 1];
   uint8_t length = this->rx_buffer_[offset + 2];
-  const uint8_t *value = &this->rx_buffer_[offset + 3];
+  if ((offset + 3 + length) > end) {
+    ESP_LOGW(TAG, "Property 0x%02X length %u exceeds packet (offset=%u, end=%u)", property, length, offset, end);
+    return end;
+  }
+  const uint8_t *value = (length > 0) ? &this->rx_buffer_[offset + 3] : nullptr;
+
   switch(property) {
     case 0x80:  // Power mode
       if (length == 1) {
@@ -876,9 +883,12 @@ size_t PanasonicACWLAN::parse_property(size_t offset) {
       }
       break;
     default:
+      constexpr size_t MAX_LOG_BYTES = 16;
+      char hex[format_hex_pretty_size(MAX_LOG_BYTES)];
+      format_hex_pretty_to(hex, sizeof(hex), value, std::min<size_t>(length, MAX_LOG_BYTES));
       ESP_LOGD(TAG,
-        "Unknown property: attrb=0x%02X id=0x%02X len=%u value[0]=0x%02X",
-        attrb, property, length, value[0]);
+        "Unknown property: attrb=0x%02X id=0x%02X len=%u value=%s",
+        attrb, property, length, hex);
   }
   return offset + 3 + length;
 }

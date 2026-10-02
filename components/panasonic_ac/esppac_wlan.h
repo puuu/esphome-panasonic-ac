@@ -81,7 +81,7 @@ class PanasonicACWLAN : public PanasonicAC {
   void set_value(uint8_t property, const uint8_t *value, size_t length, uint8_t attrb=0x00);
   void request_value(uint8_t property, uint8_t attrb=0x00);
 
-  size_t parse_property(size_t offset);
+  size_t parse_property(size_t offset, size_t end);
   void decode_properties();
   bool power_state = false;
 };
